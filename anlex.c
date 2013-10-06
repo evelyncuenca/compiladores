@@ -72,7 +72,7 @@ typedef struct entrada{
 	char lexema[TAMLEX];	
 	struct entrada *tipoDato; // null puede representar variable no declarada	
 	// aqui irian mas atributos para funciones y procedimientos...
-	
+
 } entrada;
 
 typedef struct {
@@ -88,6 +88,9 @@ int consumir;			/* 1 indica al analizador lexico que debe devolver
 char cad[5*TAMLEX];		// string utilizado para cargar mensajes de error
 token t;				// token global para recibir componentes del Analizador Lexico
 
+int linea;
+int anterior;
+
 // variables para el analizador lexico
 
 FILE *archivo;			// Fuente pascal
@@ -101,6 +104,13 @@ int numLinea=1;			// Numero de Linea
 
 
 void sigLex();		// Del analizador Lexico
+
+void expresion();
+void suma_resta();
+void mult_div();
+void expo();
+void parentesis();
+void atomo();
 
 /**************** Funciones **********************/
 
@@ -128,7 +138,7 @@ void insertar(entrada e);
 void initTabla()
 {	
 	int i=0;
-	
+
 	tabla=(entrada*)malloc(tamTabla*sizeof(entrada));
 	for(i=0;i<tamTabla;i++)
 	{
@@ -292,7 +302,7 @@ void sigLex()
 
 	while((c=fgetc(archivo))!=EOF)
 	{
-		
+
 		if (c==' ' || c=='\t')
 			continue;	//eliminar espacios en blanco
 		else if(c=='\n')
@@ -336,7 +346,7 @@ void sigLex()
 				estado=0;
 				acepto=0;
 				id[i]=c;
-				
+
 				while(!acepto)
 				{
 					switch(estado){
@@ -359,7 +369,7 @@ void sigLex()
 							estado=6;
 						}
 						break;
-					
+
 					case 1://un punto, debe seguir un digito (caso especial de array, puede venir otro punto)
 						c=fgetc(archivo);						
 						if (isdigit(c))
@@ -528,8 +538,20 @@ void sigLex()
 		}
 		else if (c=='/')
 		{
-			t.compLex=OPMULT;
-			t.pe=buscar("/");
+			// puede ser comentario
+			c=fgetc(archivo);
+			if(c=='/'){
+				while(c!= '\n'){
+					c=fgetc(archivo);
+				}
+				//ungetc(c,archivo);
+				numLinea++;
+				continue;
+			}else{
+				ungetc(c,archivo);
+				t.compLex=OPMULT;
+				t.pe=buscar("/");
+			}
 			break;
 		}
 		else if (c=='=')
@@ -679,17 +701,18 @@ void sigLex()
 		sprintf(e.lexema,"EOF");
 		t.pe=&e;
 	}
-	
+
 }
 
 int main(int argc,char* args[])
 {
 	// inicializar analizador lexico
 	int complex=0;
+	double res;
 
 	initTabla();
 	initTablaSimbolos();
-	
+
 	if(argc > 1)
 	{
 		if (!(archivo=fopen(args[1],"rt")))
@@ -697,10 +720,17 @@ int main(int argc,char* args[])
 			printf("Archivo no encontrado.\n");
 			exit(1);
 		}
+		sigLex();
 		while (t.compLex!=EOF){
-			sigLex();
-			printf("Lin %d: %s -> %d\n",numLinea,t.pe->lexema,t.compLex);
+			linea = numLinea;
+			res = 0;
+			printf("Linea %d\t\t",numLinea);
+			expresion(&res);
+			if (res != 0)
+			printf(" = %1.2f", res);
+			printf("\n");
 		}
+		system("pause");
 		fclose(archivo);
 	}else{
 		printf("Debe pasar como parametro el path al archivo fuente.\n");
@@ -708,4 +738,124 @@ int main(int argc,char* args[])
 	}
 
 	return 0;
+}
+
+void expresion( double *res )
+{
+	printf("%s",t.pe->lexema);
+	suma_resta(res);
+}
+
+void suma_resta(double *res )
+{	
+	
+	register char op;
+	double temp;
+	mult_div(res);
+	while((op = *t.pe->lexema) == '+' || op == '-')
+	{
+		anterior=t.compLex;
+		sigLex();
+		if (linea == numLinea){
+			if (anterior !=  t.compLex)
+			printf("%s",t.pe->lexema);
+			mult_div(&temp);
+			switch( op ){
+				case '-' : *res = *res - temp;
+					break;
+				case '+' : 
+					
+					*res = *res + temp;
+					break;
+			}
+		}else{
+			printf("\t\tNo se puede calcular...");
+			*res=0;return;
+		}
+	}
+	
+}
+
+void mult_div( double *res )
+{
+	
+	register char op;
+	double temp;
+	
+	expo(res);
+	while((op = *t.pe->lexema) == '*' || op == '/' || op == '%')
+	{
+		anterior=t.compLex;
+		sigLex();if (linea == numLinea){
+		if (anterior !=  t.compLex)
+		printf("%s",t.pe->lexema);
+		expo(&temp);
+		switch( op ){
+			case '*' : *res = *res * temp;
+				break;
+			case '/' : *res = *res / temp;
+				break;
+			case '%' : *res = (int) *res % (int) temp;
+				break;
+		}}else{
+			printf("\t\tNo se puede calcular...");*res=0;return;
+		}
+	}
+}
+
+void expo( double *res )
+{
+	
+	register char op;
+	double temp;
+	
+	parentesis(res);
+	if((op = *t.pe->lexema) == 'e')
+	{
+		anterior=t.compLex;
+		sigLex();
+		if (linea == numLinea){
+			if (anterior !=  t.compLex)
+			printf("%s",t.pe->lexema);
+			parentesis(&temp);
+			*res =  (*res)*pow(10,temp);
+		}else{
+			printf("\t\tNo se puede calcular...");*res=0;return;
+		}
+	}
+}
+
+
+void parentesis( double *res )
+{
+	if((*t.pe->lexema) == '('){
+		anterior=t.compLex;
+		sigLex();
+		if (linea == numLinea){
+			if (anterior !=  t.compLex)
+			printf("%s",t.pe->lexema);
+			suma_resta(res);
+			if((*t.pe->lexema) != ')'){
+			printf("\t\tERROR... se esperaba ) \n");}
+			sigLex();if (linea != numLinea){return;}
+		}else{
+			printf("\t\tNo se puede calcular...");*res=0;return;
+		}
+		//printf("%s",t.pe->lexema);// imprime el signp - pero no quita el 1ro del siguiente
+	}
+	else
+		atomo(res);
+}
+
+void atomo( double *res )
+{
+	if(t.compLex == NUM && linea == numLinea){
+		*res = atof(t.pe->lexema);
+		anterior=t.compLex;
+		sigLex();
+		if (anterior !=  t.compLex)
+		printf("%s",t.pe->lexema);
+		return;
+	}
+	printf("\t\tERROR... no se esperaba %s",t.pe->lexema);*res=0;return;
 }
